@@ -73,7 +73,56 @@ test("Alt+Tab switches to the previously used tab", async ({ openTabs, activeTit
   await expect.poll(activeTitle).toBe("site-b");
 });
 
-test("pressing Tab repeatedly while holding Alt goes further back", async ({ openTabs, activeTitle }) => {
+test("Alt+Tab keeps working from the tab it switched to", async ({ openTabs, activeTitle }) => {
+  const [, b, c] = await openTabs(["a", "b", "c"]);
+
+  await holdAltAndTab(c);
+  await c.keyboard.up("Alt");
+  await expect.poll(activeTitle).toBe("site-b");
+
+  await b.bringToFront();
+  await holdAltAndTab(b);
+  await b.keyboard.up("Alt");
+  await expect.poll(activeTitle).toBe("site-c");
+});
+
+test("keeps working in tabs that were open before the extension was reloaded", async ({
+  context,
+  worker,
+  openTabs,
+  activeTitle,
+}) => {
+  const [, , c] = await openTabs(["a", "b", "c"]);
+
+  // Same as the reload button in chrome://extensions (which needs developer mode).
+  const extensions = await context.newPage();
+  await extensions.goto("chrome://extensions");
+  await extensions.evaluate(async (id) => {
+    await new Promise((r) => chrome.developerPrivate.updateProfileConfiguration({ inDeveloperMode: true }, r));
+    await new Promise((r) => chrome.developerPrivate.reload(id, { failQuietly: true }, r));
+  }, new URL(worker.url()).host);
+  await extensions.close();
+  let reloaded;
+  await expect
+    .poll(() => (reloaded = context.serviceWorkers().find((w) => w !== worker)), { timeout: 10_000 })
+    .toBeTruthy();
+  // Wait until onInstalled has re-injected the content script.
+  await expect
+    .poll(() => reloaded.evaluate(async () => (await chrome.tabs.query({ title: "site-c" })).length))
+    .toBe(1);
+  await c.waitForTimeout(500);
+  await c.bringToFront();
+
+  await holdAltAndTab(c);
+  await c.keyboard.up("Alt");
+  await expect
+    .poll(() =>
+      reloaded.evaluate(async () => (await chrome.tabs.query({ active: true, url: "http://127.0.0.1/*" }))[0]?.title)
+    )
+    .toBe("site-b");
+});
+
+test("pressing Tab repeatedly while holding Alt goes further back",async ({ openTabs, activeTitle }) => {
   const [, , c] = await openTabs(["a", "b", "c"]);
 
   await holdAltAndTab(c, 2);

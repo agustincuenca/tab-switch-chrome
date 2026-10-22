@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { createPage, makeTabs, key, flush, cards, selectedTitle } from "./helpers.js";
+import { createPage, makeTabs, key, flush, cards, selectedTitle, source } from "./helpers.js";
 
 describe("content script (Alt+Tab overlay)", () => {
   let window, messages;
@@ -130,14 +130,47 @@ describe("content script (Alt+Tab overlay)", () => {
     expect(page.messages.filter((m) => m.type === "getTabs")).toHaveLength(1);
   });
 
-  it("survives the extension being reloaded (orphaned script)", async () => {
+  it("recovers when a message to the extension fails", async () => {
     window.chrome.runtime.sendMessage = async () => {
-      throw new Error("Extension context invalidated.");
+      throw new Error("Could not establish connection.");
     };
     altTab();
     await flush();
     expect(overlay()).toBeUndefined();
     // Still usable afterwards: state went back to idle.
     expect(altTab().defaultPrevented).toBe(true);
+  });
+
+  it("an orphaned copy steps aside instead of swallowing keys", async () => {
+    altTab();
+    await flush();
+    delete window.chrome.runtime.id; // extension context invalidated
+    const event = altTab();
+    expect(event.defaultPrevented).toBe(false);
+    expect(window.document.querySelector("tab-switch-overlay")).toBeNull();
+  });
+
+  it("a re-injected copy replaces the previous one after an extension reload", async () => {
+    altTab();
+    await flush();
+    releaseAlt();
+    messages.length = 0;
+
+    // Reload: the old copy keeps running but can no longer reach the extension.
+    const staleRuntime = window.chrome.runtime;
+    window.chrome = {
+      runtime: { id: "test-extension", sendMessage: async (msg) => (messages.push(msg), msg.type === "getTabs" ? makeTabs(3) : undefined) },
+    };
+    staleRuntime.sendMessage = async () => {
+      throw new Error("Extension context invalidated.");
+    };
+    window.eval(source("switcher-ui.js") + source("content.js"));
+
+    altTab();
+    await flush();
+    expect(sent("getTabs")).toHaveLength(1);
+    expect(cards(overlay())).toHaveLength(3);
+    releaseAlt();
+    expect(sent("activate")).toEqual([{ type: "activate", tabId: 2 }]);
   });
 });

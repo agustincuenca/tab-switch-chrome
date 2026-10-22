@@ -35,6 +35,7 @@ export function createPage({ tabs = [] } = {}) {
   const messages = [];
   window.chrome = {
     runtime: {
+      id: "test-extension",
       sendMessage: async (msg) => {
         messages.push(msg);
         if (msg.type === "getTabs") return structuredClone(tabs);

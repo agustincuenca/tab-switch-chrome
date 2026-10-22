@@ -2,7 +2,9 @@
 // toolbar popup (popup.js). Renders inside a shadow root so page styles
 // can't leak in.
 
-globalThis.TabSwitcherUI ??= class TabSwitcherUI {
+// Plain assignment (not ??=) so a re-injected copy replaces an outdated class
+// left behind by a previous version of the extension.
+globalThis.TabSwitcherUI = class TabSwitcherUI {
   static STYLES = `
     :host { all: initial; }
     .backdrop {
