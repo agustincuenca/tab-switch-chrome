@@ -35,6 +35,7 @@ function loadBackground({ thumbs = {}, lastFocusedActive = 2 } = {}) {
         return tab;
       }),
       remove: vi.fn(async () => {}),
+      sendMessage: vi.fn(async () => {}),
       captureVisibleTab: vi.fn(async () => "data:image/jpeg;base64,RAW"),
       onActivated: on("tabs.onActivated"),
       onUpdated: on("tabs.onUpdated"),
@@ -148,6 +149,13 @@ describe("background service worker", () => {
     expect(await send({ type: "activate", tabId: 999 })).toEqual({ error: "Error: No tab with id: 999" });
   });
 
+  it("relays keys from an iframe to the top frame of the same tab", async () => {
+    const { send, chrome } = loadBackground();
+    const event = { type: "keydown", code: "Tab", altKey: true };
+    await send({ type: "relayKey", event }, { tab: { id: 3 }, frameId: 7 });
+    expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(3, { type: "relayedKey", event }, { frameId: 0 });
+  });
+
   it("ignores unknown messages", async () => {
     const { listeners } = loadBackground();
     expect(listeners["runtime.onMessage"]({ type: "nope" }, {}, () => {})).toBe(false);
@@ -166,7 +174,7 @@ describe("background service worker", () => {
     const injected = chrome.scripting.executeScript.mock.calls.map(([arg]) => arg.target.tabId);
     expect(injected).toEqual([1, 2, 3]);
     expect(chrome.scripting.executeScript).toHaveBeenCalledWith({
-      target: { tabId: 1 },
+      target: { tabId: 1, allFrames: true },
       files: ["switcher-ui.js", "content.js"],
     });
   });

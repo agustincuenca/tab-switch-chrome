@@ -76,11 +76,19 @@ async function closeTab(tabId) {
   await chrome.tabs.remove(tabId);
 }
 
+// Key events caught inside an iframe are forwarded to the tab's top frame,
+// which owns the overlay. Relaying through here (instead of postMessage)
+// means a web page can't fake them.
+async function relayKey(tabId, event) {
+  await chrome.tabs.sendMessage(tabId, { type: "relayedKey", event }, { frameId: 0 });
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const handlers = {
     getTabs: () => getTabs(sender.tab?.id),
     activate: () => activateTab(msg.tabId),
     close: () => closeTab(msg.tabId),
+    relayKey: () => relayKey(sender.tab?.id, msg.event),
   };
   const handler = handlers[msg?.type];
   if (!handler) return false;
@@ -106,7 +114,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   const tabs = await chrome.tabs.query({ url: ["http://*/*", "https://*/*", "file://*/*"] });
   for (const tab of tabs) {
     chrome.scripting
-      .executeScript({ target: { tabId: tab.id }, files: ["switcher-ui.js", "content.js"] })
+      .executeScript({ target: { tabId: tab.id, allFrames: true }, files: ["switcher-ui.js", "content.js"] })
       .catch(() => {});
   }
 });

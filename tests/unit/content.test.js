@@ -159,7 +159,11 @@ describe("content script (Alt+Tab overlay)", () => {
     // Reload: the old copy keeps running but can no longer reach the extension.
     const staleRuntime = window.chrome.runtime;
     window.chrome = {
-      runtime: { id: "test-extension", sendMessage: async (msg) => (messages.push(msg), msg.type === "getTabs" ? makeTabs(3) : undefined) },
+      runtime: {
+        id: "test-extension",
+        sendMessage: async (msg) => (messages.push(msg), msg.type === "getTabs" ? makeTabs(3) : undefined),
+        onMessage: staleRuntime.onMessage,
+      },
     };
     staleRuntime.sendMessage = async () => {
       throw new Error("Extension context invalidated.");
@@ -170,7 +174,148 @@ describe("content script (Alt+Tab overlay)", () => {
     await flush();
     expect(sent("getTabs")).toHaveLength(1);
     expect(cards(overlay())).toHaveLength(3);
+    expect(window.document.querySelectorAll("tab-switch-overlay")).toHaveLength(1);
     releaseAlt();
     expect(sent("activate")).toEqual([{ type: "activate", tabId: 2 }]);
+  });
+
+  describe("keys relayed from a focused iframe", () => {
+    let page;
+    beforeEach(() => {
+      page = createPage({ tabs: makeTabs(4) });
+      page.load("switcher-ui.js", "content.js");
+      ({ window, messages } = page);
+    });
+    const relayed = (type, init) => page.deliver({ type: "relayedKey", event: { type, altKey: false, shiftKey: false, ctrlKey: false, metaKey: false, ...init } });
+
+    it("open the switcher and switch on Alt release", async () => {
+      relayed("keydown", { key: "Tab", code: "Tab", altKey: true });
+      await flush();
+      expect(selectedTitle(overlay())).toBe("Tab 2");
+      relayed("keydown", { key: "Tab", code: "Tab", altKey: true });
+      relayed("keyup", { key: "Alt", code: "AltLeft" });
+      expect(sent("activate")).toEqual([{ type: "activate", tabId: 3 }]);
+    });
+
+    it("ignore unrelated messages", () => {
+      page.deliver({ type: "somethingElse" });
+      page.deliver(undefined);
+      expect(messages).toHaveLength(0);
+    });
+  });
+});
+
+describe("pages that swallow the Alt+Tab keydown before us", () => {
+  // Google Calendar and Sheets stop Alt+Tab keydowns in their own listeners.
+  // When the content script is injected into an already open tab, those run
+  // first and only the keyup reaches us.
+  let page, window;
+  beforeEach(() => {
+    page = createPage({ tabs: makeTabs(4) });
+    window = page.window;
+    window.addEventListener(
+      "keydown",
+      (e) => {
+        if (e.code === "Tab" && e.altKey) e.stopImmediatePropagation();
+      },
+      true
+    );
+    page.load("switcher-ui.js", "content.js");
+  });
+  const overlay = () => window.document.querySelector("tab-switch-overlay")?.shadowRoot;
+  const pressTab = (init = {}) => {
+    key(window, "keydown", { key: "Tab", code: "Tab", altKey: true, ...init });
+    return key(window, "keyup", { key: "Tab", code: "Tab", altKey: true, ...init });
+  };
+  const sent = (type) => page.messages.filter((m) => m.type === type);
+
+  it("opens the switcher from the keyup", async () => {
+    key(window, "keydown", { key: "Alt", code: "AltLeft", altKey: true });
+    const keyup = pressTab();
+    expect(keyup.defaultPrevented).toBe(true);
+    await flush();
+    expect(selectedTitle(overlay())).toBe("Tab 2");
+  });
+
+  it("cycles on each keyup and switches when Alt is released", async () => {
+    pressTab();
+    await flush();
+    pressTab();
+    pressTab({ shiftKey: true });
+    pressTab();
+    expect(selectedTitle(overlay())).toBe("Tab 3");
+    key(window, "keyup", { key: "Alt", code: "AltLeft" });
+    expect(sent("activate")).toEqual([{ type: "activate", tabId: 3 }]);
+  });
+
+  it("does not count a press twice when both keydown and keyup arrive", async () => {
+    // Shift+Alt+Tab isn't swallowed by this page, so we see both events.
+    key(window, "keydown", { key: "Tab", code: "Tab", altKey: true, shiftKey: true });
+    key(window, "keyup", { key: "Tab", code: "Tab", altKey: true, shiftKey: true });
+    await flush();
+    expect(selectedTitle(overlay())).toBe("Tab 4");
+  });
+
+  it("ignores keyups of plain Tab", async () => {
+    key(window, "keyup", { key: "Tab", code: "Tab" });
+    await flush();
+    expect(page.messages).toHaveLength(0);
+  });
+});
+
+describe("content script inside an iframe", () => {
+  let page;
+  beforeEach(() => {
+    page = createPage({ iframe: true });
+    page.load("switcher-ui.js", "content.js");
+  });
+  const relays = () => page.messages.filter((m) => m.type === "relayKey").map((m) => [m.event.type, m.event.code]);
+
+  it("never renders an overlay itself", async () => {
+    key(page.window, "keydown", { key: "Tab", code: "Tab", altKey: true });
+    await flush();
+    expect(page.window.document.querySelector("tab-switch-overlay")).toBeNull();
+    expect(page.messages.filter((m) => m.type === "getTabs")).toHaveLength(0);
+  });
+
+  it("relays Alt+Tab and every key until Alt is released", () => {
+    const first = key(page.window, "keydown", { key: "Tab", code: "Tab", altKey: true });
+    const arrow = key(page.window, "keydown", { key: "ArrowRight", code: "ArrowRight", altKey: true });
+    key(page.window, "keyup", { key: "Alt", code: "AltLeft" });
+    const after = key(page.window, "keydown", { key: "a", code: "KeyA" });
+
+    expect(first.defaultPrevented).toBe(true);
+    expect(arrow.defaultPrevented).toBe(true);
+    expect(after.defaultPrevented).toBe(false);
+    expect(relays()).toEqual([
+      ["keydown", "Tab"],
+      ["keydown", "ArrowRight"],
+      ["keyup", "AltLeft"],
+    ]);
+  });
+
+  it("relays nothing for normal typing", () => {
+    key(page.window, "keydown", { key: "Tab", code: "Tab" });
+    key(page.window, "keydown", { key: "a", code: "KeyA", altKey: true });
+    expect(relays()).toEqual([]);
+  });
+
+  it("relays the keyup when the page swallowed the Alt+Tab keydown", () => {
+    page.window.addEventListener("keydown", (e) => e.stopImmediatePropagation(), true);
+    page.load("switcher-ui.js", "content.js"); // re-inject after the page's listener
+    key(page.window, "keydown", { key: "Tab", code: "Tab", altKey: true });
+    key(page.window, "keyup", { key: "Tab", code: "Tab", altKey: true });
+    key(page.window, "keyup", { key: "Alt", code: "AltLeft" });
+    expect(relays()).toEqual([
+      ["keyup", "Tab"],
+      ["keyup", "AltLeft"],
+    ]);
+  });
+
+  it("stops relaying when the iframe loses focus", () => {
+    key(page.window, "keydown", { key: "Tab", code: "Tab", altKey: true });
+    page.window.dispatchEvent(new page.window.Event("blur"));
+    key(page.window, "keydown", { key: "a", code: "KeyA" });
+    expect(relays()).toEqual([["keydown", "Tab"]]);
   });
 });

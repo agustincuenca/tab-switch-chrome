@@ -19,13 +19,20 @@ export function makeTabs(count) {
 }
 
 // A fresh jsdom page with a mocked `chrome.runtime` that records messages.
-// Shadow roots are forced open so tests can inspect the rendered switcher.
-export function createPage({ tabs = [] } = {}) {
-  const { window } = new JSDOM("<!doctype html><html><body></body></html>", {
+// Shadow roots are forced open so tests can inspect the rendered switcher. With `iframe: true` the scripts are
+// loaded into an iframe instead of the top frame.
+export function createPage({ tabs = [], iframe = false } = {}) {
+  const dom = new JSDOM("<!doctype html><html><body></body></html>", {
     runScripts: "outside-only",
     pretendToBeVisual: true,
     url: "https://example.com/",
   });
+  let window = dom.window;
+  if (iframe) {
+    const frame = window.document.createElement("iframe");
+    window.document.body.append(frame);
+    window = frame.contentWindow;
+  }
   const attachShadow = window.Element.prototype.attachShadow;
   window.Element.prototype.attachShadow = function () {
     return attachShadow.call(this, { mode: "open" });
@@ -33,6 +40,7 @@ export function createPage({ tabs = [] } = {}) {
   window.Element.prototype.scrollIntoView = () => {};
 
   const messages = [];
+  const onMessage = [];
   window.chrome = {
     runtime: {
       id: "test-extension",
@@ -40,12 +48,18 @@ export function createPage({ tabs = [] } = {}) {
         messages.push(msg);
         if (msg.type === "getTabs") return structuredClone(tabs);
       },
+      onMessage: {
+        addListener: (fn) => onMessage.push(fn),
+        removeListener: (fn) => onMessage.splice(onMessage.indexOf(fn), 1),
+      },
     },
   };
 
   return {
     window,
     messages,
+    // Delivers a message from the service worker to the content script.
+    deliver: (msg) => onMessage.forEach((fn) => fn(msg, {}, () => {})),
     load: (...files) => files.forEach((file) => window.eval(source(file))),
   };
 }

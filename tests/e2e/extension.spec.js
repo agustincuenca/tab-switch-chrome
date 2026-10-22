@@ -11,10 +11,20 @@ const extensionPath = path.resolve(import.meta.dirname, "../..");
 
 const test = base.extend({
   site: async ({}, use) => {
+    // /<name>/frame embeds a cross-origin iframe (localhost vs 127.0.0.1)
+    // holding a text field, like an embedded editor.
+    // /<name>/blocks-alt-tab swallows Alt+Tab keydowns like Google Calendar.
     const server = createServer((req, res) => {
-      const name = `site-${req.url.slice(1)}`;
+      const [name, extra] = req.url.slice(1).split("/");
+      const port = server.address().port;
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(`<title>${name}</title><h1>${name}</h1>`);
+      if (name === "inner") return res.end(`<input id="field">`);
+      const frame = extra === "frame" ? `<iframe src="http://localhost:${port}/inner"></iframe>` : "";
+      const blocker =
+        extra === "blocks-alt-tab"
+          ? `<script>addEventListener("keydown", (e) => e.code === "Tab" && e.altKey && e.stopImmediatePropagation(), true)</script>`
+          : "";
+      res.end(`<title>site-${name}</title>${blocker}<h1>site-${name}</h1>${frame}`);
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
     await use((name) => `http://127.0.0.1:${server.address().port}/${name}`);
@@ -41,7 +51,7 @@ const test = base.extend({
         const pagePromise = context.waitForEvent("page");
         await worker.evaluate((url) => chrome.tabs.create({ url }), site(name));
         const page = await pagePromise;
-        await expect(page).toHaveTitle(`site-${name}`);
+        await expect(page).toHaveTitle(`site-${name.split("/")[0]}`);
         pages.push(page);
       }
       return pages;
@@ -56,6 +66,28 @@ const test = base.extend({
     );
   },
 });
+
+// Same as the reload button in chrome://extensions (which needs developer
+// mode). Resolves with the new service worker once onInstalled has had time
+// to re-inject the content scripts into open tabs.
+async function reloadExtension(context, worker) {
+  const extensions = await context.newPage();
+  await extensions.goto("chrome://extensions");
+  await extensions.evaluate(async (id) => {
+    await new Promise((r) => chrome.developerPrivate.updateProfileConfiguration({ inDeveloperMode: true }, r));
+    await new Promise((r) => chrome.developerPrivate.reload(id, { failQuietly: true }, r));
+  }, new URL(worker.url()).host);
+  await extensions.close();
+  let reloaded;
+  await expect
+    .poll(() => (reloaded = context.serviceWorkers().find((w) => w !== worker)), { timeout: 10_000 })
+    .toBeTruthy();
+  await new Promise((r) => setTimeout(r, 500));
+  return reloaded;
+}
+
+const activeTitleIn = (worker) =>
+  worker.evaluate(async () => (await chrome.tabs.query({ active: true, url: "http://127.0.0.1/*" }))[0]?.title);
 
 async function holdAltAndTab(page, presses = 1) {
   await page.keyboard.down("Alt");
@@ -90,39 +122,45 @@ test("keeps working in tabs that were open before the extension was reloaded", a
   context,
   worker,
   openTabs,
-  activeTitle,
 }) => {
   const [, , c] = await openTabs(["a", "b", "c"]);
 
-  // Same as the reload button in chrome://extensions (which needs developer mode).
-  const extensions = await context.newPage();
-  await extensions.goto("chrome://extensions");
-  await extensions.evaluate(async (id) => {
-    await new Promise((r) => chrome.developerPrivate.updateProfileConfiguration({ inDeveloperMode: true }, r));
-    await new Promise((r) => chrome.developerPrivate.reload(id, { failQuietly: true }, r));
-  }, new URL(worker.url()).host);
-  await extensions.close();
-  let reloaded;
-  await expect
-    .poll(() => (reloaded = context.serviceWorkers().find((w) => w !== worker)), { timeout: 10_000 })
-    .toBeTruthy();
-  // Wait until onInstalled has re-injected the content script.
-  await expect
-    .poll(() => reloaded.evaluate(async () => (await chrome.tabs.query({ title: "site-c" })).length))
-    .toBe(1);
-  await c.waitForTimeout(500);
+  const reloaded = await reloadExtension(context, worker);
   await c.bringToFront();
 
   await holdAltAndTab(c);
   await c.keyboard.up("Alt");
-  await expect
-    .poll(() =>
-      reloaded.evaluate(async () => (await chrome.tabs.query({ active: true, url: "http://127.0.0.1/*" }))[0]?.title)
-    )
-    .toBe("site-b");
+  await expect.poll(() => activeTitleIn(reloaded)).toBe("site-b");
 });
 
-test("pressing Tab repeatedly while holding Alt goes further back",async ({ openTabs, activeTitle }) => {
+test("works on pages that swallow the Alt+Tab keydown before the extension sees it", async ({
+  context,
+  worker,
+  openTabs,
+}) => {
+  const [, , c] = await openTabs(["a", "b", "c/blocks-alt-tab"]);
+  // Re-injecting into the open tab puts the page's listener ahead of ours.
+  const reloaded = await reloadExtension(context, worker);
+  await c.bringToFront();
+
+  await holdAltAndTab(c, 2);
+  await c.keyboard.up("Alt");
+  await expect.poll(() => activeTitleIn(reloaded)).toBe("site-a");
+});
+
+test("works while keyboard focus is inside a cross-origin iframe", async ({ openTabs, activeTitle }) => {
+  const [, , c] = await openTabs(["a", "b", "c/frame"]);
+  const field = c.frameLocator("iframe").locator("#field");
+  await field.click();
+  await expect(field).toBeFocused();
+
+  await holdAltAndTab(c);
+  await c.keyboard.up("Alt");
+
+  await expect.poll(activeTitle).toBe("site-b");
+});
+
+test("pressing Tab repeatedly while holding Alt goes further back", async ({ openTabs, activeTitle }) => {
   const [, , c] = await openTabs(["a", "b", "c"]);
 
   await holdAltAndTab(c, 2);
