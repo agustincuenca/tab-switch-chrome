@@ -3,7 +3,7 @@
   "name": "Tab Switch",
   "version": "1.0.0",
   "description": "Cambia de pestaña con Alt+Tab mostrando un selector visual de las pestañas de Chrome, estilo AltTab.",
-  "permissions": ["tabs", "storage", "scripting", "favicon"],
+  "permissions": ["tabs", "storage", "unlimitedStorage", "scripting", "favicon"],
   "host_permissions": ["<all_urls>"],
   "background": {
     "service_worker": "background.js"

@@ -10,10 +10,24 @@ const TABS = [
 ];
 
 // Runs background.js in its own context against a mocked `chrome` API.
-function loadBackground({ thumbs = {}, lastFocusedActive = 2 } = {}) {
+// A chrome.storage area backed by a plain object.
+function storageArea(initial = {}) {
+  const data = { ...initial };
+  const pick = (keys) =>
+    keys == null ? { ...data } : Object.fromEntries([keys].flat().filter((k) => k in data).map((k) => [k, data[k]]));
+  return {
+    data,
+    get: async (keys) => pick(keys),
+    set: async (items) => Object.assign(data, items),
+    remove: async (keys) => [keys].flat().forEach((k) => delete data[k]),
+  };
+}
+
+function loadBackground({ local = {}, session = {}, lastFocusedActive = 2 } = {}) {
   const listeners = {};
   const on = (name) => ({ addListener: (fn) => (listeners[name] = fn) });
-  const store = { ...thumbs };
+  const localArea = storageArea(local);
+  const sessionArea = storageArea(session);
   const tabs = structuredClone(TABS);
 
   const chrome = {
@@ -46,13 +60,7 @@ function loadBackground({ thumbs = {}, lastFocusedActive = 2 } = {}) {
       update: vi.fn(async () => {}),
       onFocusChanged: on("windows.onFocusChanged"),
     },
-    storage: {
-      session: {
-        get: async () => ({ ...store }),
-        set: async (items) => Object.assign(store, items),
-        remove: async (k) => delete store[k],
-      },
-    },
+    storage: { local: localArea, session: sessionArea },
     scripting: { executeScript: vi.fn(async () => []) },
   };
 
@@ -79,6 +87,7 @@ function loadBackground({ thumbs = {}, lastFocusedActive = 2 } = {}) {
     fetch: async () => ({ blob: async () => ({}) }),
     createImageBitmap: async () => ({ width: 1920, height: 1200 }),
     // Delegate lazily so vi.useFakeTimers() applies.
+    Date: new Proxy(Date, { get: (_, prop) => globalThis.Date[prop], construct: (_, args) => new globalThis.Date(...args) }),
     setTimeout: (...args) => setTimeout(...args),
     clearTimeout: (...args) => clearTimeout(...args),
   });
@@ -90,7 +99,7 @@ function loadBackground({ thumbs = {}, lastFocusedActive = 2 } = {}) {
       if (!async) resolve(undefined);
     }).then((r) => JSON.parse(JSON.stringify(r ?? null)));
 
-  return { chrome, listeners, store, send, canvases };
+  return { chrome, listeners, local: localArea.data, session: sessionArea.data, send, canvases };
 }
 
 describe("background service worker", () => {
@@ -108,7 +117,7 @@ describe("background service worker", () => {
     });
 
     it("returns the fields the switcher needs", async () => {
-      const { send } = loadBackground({ thumbs: { "thumb:3": "data:image/jpeg;base64,T3" } });
+      const { send } = loadBackground({ local: { "thumb:https://recent.example/": "data:image/jpeg;base64,T3" } });
       const tabs = await send({ type: "getTabs" }, { tab: { id: 2 } });
       const recent = tabs.find((t) => t.id === 3);
       expect(recent).toEqual({
@@ -122,6 +131,15 @@ describe("background service worker", () => {
         pinned: true,
       });
       expect(tabs.find((t) => t.id === 1).thumb).toBeNull();
+    });
+
+    it("falls back to the tab's last capture when its URL changed since", async () => {
+      const { send } = loadBackground({
+        local: { "thumb:https://old.example/inbox": "data:image/jpeg;base64,OLD" },
+        session: { "lastCapture:1": "https://old.example/inbox" },
+      });
+      const tabs = await send({ type: "getTabs" }, { tab: { id: 2 } });
+      expect(tabs.find((t) => t.id === 1).thumb).toBe("data:image/jpeg;base64,OLD");
     });
 
     it("falls back to the URL when a tab has no title", async () => {
@@ -162,10 +180,20 @@ describe("background service worker", () => {
     expect(listeners["runtime.onMessage"](undefined, {}, () => {})).toBe(false);
   });
 
-  it("forgets the thumbnail of a closed tab", async () => {
-    const { listeners, store } = loadBackground({ thumbs: { "thumb:1": "x", "thumb:2": "y" } });
+  it("forgets which capture belonged to a closed tab, but keeps the capture", async () => {
+    const { listeners, local, session } = loadBackground({
+      local: { "thumb:https://old.example/": "x" },
+      session: { "lastCapture:1": "https://old.example/", "lastCapture:2": "https://current.example/" },
+    });
     await listeners["tabs.onRemoved"](1);
-    expect(store).toEqual({ "thumb:2": "y" });
+    expect(session).toEqual({ "lastCapture:2": "https://current.example/" });
+    expect(local).toEqual({ "thumb:https://old.example/": "x" });
+  });
+
+  it("removes the leftover debug log on install", async () => {
+    const { listeners, local } = loadBackground({ local: { debugLog: [{}], "thumb:https://a.example/": "x" } });
+    await listeners["runtime.onInstalled"]();
+    expect(local).toEqual({ "thumb:https://a.example/": "x" });
   });
 
   it("injects the content scripts into already open web pages on install", async () => {
@@ -184,13 +212,45 @@ describe("background service worker", () => {
     afterEach(() => vi.useRealTimers());
 
     it("captures and downscales the tab shortly after it is activated", async () => {
-      const { listeners, chrome, store, canvases } = loadBackground();
+      const { listeners, chrome, local, session, canvases } = loadBackground();
       listeners["tabs.onActivated"]({ tabId: 2, windowId: 10 });
       expect(chrome.tabs.captureVisibleTab).not.toHaveBeenCalled();
       await vi.runAllTimersAsync();
       expect(chrome.tabs.captureVisibleTab).toHaveBeenCalledWith(10, { format: "jpeg", quality: 80 });
-      expect(canvases[0]).toMatchObject({ width: 480, height: 300 });
-      expect(store["thumb:2"]).toBe("data:image/jpeg;base64,AQID");
+      expect(canvases[0]).toMatchObject({ width: 640, height: 400 });
+      expect(local["thumb:https://current.example/"]).toBe("data:image/jpeg;base64,AQID");
+      expect(Object.keys(local.thumbIndex)).toEqual(["https://current.example/"]);
+      expect(session["lastCapture:2"]).toBe("https://current.example/");
+    });
+
+    it("keeps captures across extension reloads (they live in storage.local)", async () => {
+      const first = loadBackground();
+      first.listeners["tabs.onActivated"]({ tabId: 2, windowId: 10 });
+      await vi.runAllTimersAsync();
+
+      // A reload wipes storage.session but not storage.local.
+      const { send } = loadBackground({ local: first.local });
+      const tabs = await send({ type: "getTabs" }, { tab: { id: 1 } });
+      expect(tabs.find((t) => t.id === 2).thumb).toBe("data:image/jpeg;base64,AQID");
+    });
+
+    it("prunes the oldest captures past the limit", async () => {
+      const index = {};
+      const local = {};
+      for (let i = 0; i < 400; i++) {
+        index[`https://site${i}.example/`] = 1000 + i;
+        local[`thumb:https://site${i}.example/`] = "x";
+      }
+      local.thumbIndex = index;
+      const bg = loadBackground({ local });
+      bg.listeners["tabs.onActivated"]({ tabId: 2, windowId: 10 });
+      await vi.runAllTimersAsync();
+
+      expect(Object.keys(bg.local.thumbIndex)).toHaveLength(400);
+      expect(bg.local["thumb:https://site0.example/"]).toBeUndefined();
+      expect(bg.local.thumbIndex["https://site0.example/"]).toBeUndefined();
+      expect(bg.local["thumb:https://site1.example/"]).toBe("x");
+      expect(bg.local["thumb:https://current.example/"]).toBeDefined();
     });
 
     it("debounces rapid tab changes into a single capture", async () => {
@@ -214,6 +274,46 @@ describe("background service worker", () => {
       expect(chrome.tabs.captureVisibleTab).toHaveBeenCalledOnce();
     });
 
+    describe("snapshots requested by the page", () => {
+      const current = { id: 2, windowId: 10, url: "https://current.example/", active: true };
+
+      it("capture the visible tab right away and save it under its URL", async () => {
+        const { send, chrome, local } = loadBackground();
+        await send({ type: "snapshot" }, { tab: current });
+        expect(chrome.tabs.captureVisibleTab).toHaveBeenCalledOnce();
+        await vi.runAllTimersAsync();
+        expect(local["thumb:https://current.example/"]).toBe("data:image/jpeg;base64,AQID");
+      });
+
+      it("are ignored for background tabs", async () => {
+        const { send, chrome } = loadBackground();
+        await send({ type: "snapshot" }, { tab: { ...current, id: 1, active: false } });
+        expect(chrome.tabs.captureVisibleTab).not.toHaveBeenCalled();
+      });
+
+      it("respect Chrome's limit of two captures per second", async () => {
+        const { send, chrome } = loadBackground();
+        await send({ type: "snapshot" }, { tab: current });
+        await send({ type: "snapshot" }, { tab: current });
+        expect(chrome.tabs.captureVisibleTab).toHaveBeenCalledOnce();
+        vi.advanceTimersByTime(600);
+        await send({ type: "snapshot" }, { tab: current });
+        expect(chrome.tabs.captureVisibleTab).toHaveBeenCalledTimes(2);
+      });
+
+      it("are discarded if the user switched tabs during the capture", async () => {
+        const { send, chrome, local } = loadBackground();
+        chrome.tabs.captureVisibleTab.mockImplementation(async () => {
+          // Another tab of window 10 becomes active while capturing.
+          chrome.tabs.query.mockImplementation(async () => [{ id: 1, windowId: 10, active: true }]);
+          return "data:image/jpeg;base64,RAW";
+        });
+        await send({ type: "snapshot" }, { tab: current });
+        await vi.runAllTimersAsync();
+        expect(local).toEqual({});
+      });
+    });
+
     it("ignores focus leaving Chrome", async () => {
       const { listeners, chrome } = loadBackground();
       listeners["windows.onFocusChanged"](-1);
@@ -222,11 +322,11 @@ describe("background service worker", () => {
     });
 
     it("silently skips pages that can't be captured", async () => {
-      const { listeners, chrome, store } = loadBackground();
+      const { listeners, chrome, local } = loadBackground();
       chrome.tabs.captureVisibleTab.mockRejectedValue(new Error("Cannot access a chrome:// URL"));
       listeners["tabs.onActivated"]({ tabId: 2, windowId: 10 });
       await vi.runAllTimersAsync();
-      expect(store).toEqual({});
+      expect(local).toEqual({});
     });
   });
 });

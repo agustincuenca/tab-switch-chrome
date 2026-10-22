@@ -215,13 +215,59 @@ test("the popup lists tabs and switches with Enter", async ({ context, worker, o
   await expect.poll(activeTitle).toBe("site-b");
 });
 
-test("captures thumbnails of visited tabs", async ({ worker, openTabs }) => {
+test("captures thumbnails of visited tabs and keeps them across extension reloads", async ({
+  context,
+  worker,
+  openTabs,
+}) => {
   const [a] = await openTabs(["a", "b"]);
-  const tabId = await worker.evaluate(async () => (await chrome.tabs.query({ title: "site-a" }))[0].id);
-  await worker.evaluate((id) => chrome.tabs.update(id, { active: true }), tabId);
+  const tabA = await worker.evaluate(async () => (await chrome.tabs.query({ title: "site-a" }))[0]);
+  await worker.evaluate((id) => chrome.tabs.update(id, { active: true }), tabA.id);
   await a.bringToFront();
 
+  const storedThumb = (w) => w.evaluate((url) => chrome.storage.local.get(`thumb:${url}`), tabA.url);
+
   await expect
-    .poll(() => worker.evaluate((id) => chrome.storage.session.get(`thumb:${id}`), tabId), { timeout: 10_000 })
-    .toEqual({ [`thumb:${tabId}`]: expect.stringMatching(/^data:image\/jpeg;base64,/) });
+    .poll(() => storedThumb(worker), { timeout: 10_000 })
+    .toEqual({ [`thumb:${tabA.url}`]: expect.stringMatching(/^data:image\/jpeg;base64,/) });
+
+  const reloaded = await reloadExtension(context, worker);
+  expect(await storedThumb(reloaded)).toEqual({ [`thumb:${tabA.url}`]: expect.stringMatching(/^data:image/) });
+});
+
+test("refreshes the thumbnail of the tab you leave with Alt+Tab", async ({ worker, openTabs, activeTitle }) => {
+  const [, , c] = await openTabs(["a", "b", "c"]);
+  const url = c.url();
+  const storedThumb = async () => (await worker.evaluate((u) => chrome.storage.local.get(`thumb:${u}`), url))[`thumb:${url}`];
+
+  // Thumbnail taken when the tab was activated.
+  await expect.poll(storedThumb, { timeout: 10_000 }).toBeTruthy();
+  const before = await storedThumb();
+
+  // The page changes after that capture…
+  await c.evaluate(() => {
+    document.body.style.background = "#d93025";
+    document.body.innerHTML = "<h1 style='font-size:120px;color:white'>CAMBIADA</h1>";
+  });
+  await c.waitForTimeout(700); // Chrome allows two captures per second
+
+  // …and leaving it with Alt+Tab captures it again, without the switcher on it.
+  await holdAltAndTab(c);
+  await c.keyboard.up("Alt");
+  await expect.poll(activeTitle).toBe("site-b");
+  await expect.poll(storedThumb, { timeout: 5_000 }).not.toBe(before);
+
+  // The middle of the new thumbnail is the page's red, not the switcher panel.
+  const [r, g, b] = await c.evaluate(async (src) => {
+    const image = new Image();
+    image.src = src;
+    await image.decode();
+    const canvas = Object.assign(document.createElement("canvas"), { width: image.width, height: image.height });
+    const context = canvas.getContext("2d");
+    context.drawImage(image, 0, 0);
+    return [...context.getImageData(image.width / 2, image.height * 0.75, 1, 1).data];
+  }, await storedThumb());
+  expect(r).toBeGreaterThan(180);
+  expect(g).toBeLessThan(100);
+  expect(b).toBeLessThan(100);
 });

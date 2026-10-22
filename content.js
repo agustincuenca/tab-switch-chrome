@@ -116,13 +116,32 @@
     return chrome.runtime.sendMessage(msg);
   }
 
+  // Keeps this tab's thumbnail current: the service worker screenshots it
+  // when Alt goes down (we may be about to leave) and every few seconds while
+  // it's visible. The switcher waits for a pending screenshot before drawing
+  // itself or switching away, so it never ends up in the picture.
+  const SNAPSHOT_EVERY_MS = 10_000;
+  const SNAPSHOT_WAIT_MS = 250;
+  let snapshotting = null;
+
+  function requestSnapshot() {
+    snapshotting ??= send({ type: "snapshot" })
+      .catch(() => {})
+      .finally(() => (snapshotting = null));
+    return snapshotting;
+  }
+
+  function snapshotSettled() {
+    return Promise.race([requestSnapshot(), new Promise((resolve) => setTimeout(resolve, SNAPSHOT_WAIT_MS))]);
+  }
+
   async function open(startIndex) {
     state = "loading";
     pendingIndex = startIndex;
     altReleased = false;
     let tabs;
     try {
-      tabs = await send({ type: "getTabs" });
+      [tabs] = await Promise.all([send({ type: "getTabs" }), snapshotSettled()]);
     } catch {
       state = "idle";
       return;
@@ -162,6 +181,7 @@
   function onKeyDown(e) {
     if (isOrphaned()) return teardown();
     pressed.add(e.code);
+    if (e.key === "Alt" && !e.repeat && state === "idle") requestSnapshot();
     handlePress(e);
   }
 
@@ -220,6 +240,11 @@
   listen(window, "blur", onBlur);
   listen(document, "visibilitychange", onVisibilityChange);
   chrome.runtime.onMessage.addListener(onMessage);
+  const snapshotTimer = setInterval(() => {
+    if (isOrphaned()) return teardown();
+    if (state === "idle" && !document.hidden) requestSnapshot();
+  }, SNAPSHOT_EVERY_MS);
+  listeners.push(() => clearInterval(snapshotTimer));
   listeners.push(() => {
     try {
       chrome.runtime.onMessage.removeListener(onMessage);

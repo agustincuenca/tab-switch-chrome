@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { createPage, makeTabs, key, flush, cards, selectedTitle, source } from "./helpers.js";
 
 describe("content script (Alt+Tab overlay)", () => {
@@ -177,6 +177,65 @@ describe("content script (Alt+Tab overlay)", () => {
     expect(window.document.querySelectorAll("tab-switch-overlay")).toHaveLength(1);
     releaseAlt();
     expect(sent("activate")).toEqual([{ type: "activate", tabId: 2 }]);
+  });
+
+  describe("thumbnail snapshots", () => {
+    // Makes "snapshot" requests hang until the returned function is called.
+    function holdSnapshots() {
+      const original = window.chrome.runtime.sendMessage;
+      let release;
+      const held = new Promise((resolve) => (release = resolve));
+      window.chrome.runtime.sendMessage = (msg) => (msg.type === "snapshot" ? (messages.push(msg), held) : original(msg));
+      return release;
+    }
+
+    it("asks for a snapshot of this tab as soon as Alt goes down", () => {
+      key(window, "keydown", { key: "Alt", code: "AltLeft", altKey: true });
+      key(window, "keydown", { key: "Alt", code: "AltLeft", altKey: true, repeat: true });
+      expect(sent("snapshot")).toHaveLength(1);
+    });
+
+    it("waits for the snapshot before drawing the switcher", async () => {
+      const release = holdSnapshots();
+      key(window, "keydown", { key: "Alt", code: "AltLeft", altKey: true });
+      altTab();
+      await flush();
+      expect(overlay()).toBeUndefined();
+      release();
+      await flush();
+      expect(selectedTitle(overlay())).toBe("Tab 2");
+      expect(sent("snapshot")).toHaveLength(1);
+    });
+
+    it("waits for the snapshot before a quick tap switches tabs", async () => {
+      const release = holdSnapshots();
+      key(window, "keydown", { key: "Alt", code: "AltLeft", altKey: true });
+      altTab();
+      releaseAlt();
+      await flush();
+      expect(sent("activate")).toHaveLength(0);
+      release();
+      await flush();
+      expect(sent("activate")).toEqual([{ type: "activate", tabId: 2 }]);
+    });
+
+    it("does not wait forever for a slow snapshot", async () => {
+      holdSnapshots();
+      altTab();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(selectedTitle(overlay())).toBe("Tab 2");
+    });
+
+    it("takes one every 10 seconds while the tab is visible", async () => {
+      vi.useFakeTimers();
+      try {
+        setup();
+        await vi.advanceTimersByTimeAsync(25_000);
+        expect(sent("snapshot")).toHaveLength(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("keys relayed from a focused iframe", () => {

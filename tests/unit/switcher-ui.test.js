@@ -17,13 +17,52 @@ describe("TabSwitcherUI", () => {
 
   const keydown = (code, init = {}) => ui.handleKey(new window.KeyboardEvent("keydown", { code, ...init }));
 
-  it("renders one card per tab with title and host", () => {
+  it("renders one card per tab with its title", () => {
     ui.show(makeTabs(3));
     const rendered = cards(shadow);
     expect(rendered).toHaveLength(3);
     expect(rendered[1].querySelector(".title").textContent).toBe("Tab 2");
-    expect(rendered[1].querySelector(".host").textContent).toBe("site2.example");
     expect(ui.visible).toBe(true);
+  });
+
+  it("spells out the selected tab in the caption", () => {
+    ui.show(makeTabs(3), 1);
+    expect(shadow.querySelector(".caption-title").textContent).toBe("Tab 2");
+    expect(shadow.querySelector(".caption-meta").textContent).toBe("site2.example");
+    ui.move(1);
+    expect(shadow.querySelector(".caption-title").textContent).toBe("Tab 3");
+  });
+
+  it("says when the selected tab lives in another window", () => {
+    const tabs = makeTabs(3);
+    tabs[2].windowId = 2;
+    ui.show(tabs, 1);
+    expect(shadow.querySelector(".caption-meta").textContent).toBe("site2.example");
+    ui.move(1);
+    expect(shadow.querySelector(".caption-meta").textContent).toBe("site3.example · otra ventana");
+  });
+
+  it("gives tabs without a screenshot a color derived from their site", () => {
+    const tabs = makeTabs(4);
+    ui.show(tabs);
+    const [, second, , fourth] = cards(shadow).map((c) => c.querySelector(".page"));
+    expect(second.classList.contains("blank")).toBe(true);
+    expect(second.style.getPropertyValue("--hue")).toMatch(/^\d+$/);
+    expect(second.style.getPropertyValue("--hue")).not.toBe(fourth.style.getPropertyValue("--hue"));
+  });
+
+  it("shows the keyboard hints for the current mode", () => {
+    ui.show(makeTabs(2));
+    expect(shadow.querySelector(".hints").textContent).toContain("suelta para ir");
+  });
+
+  it("shrinks the cards as the number of tabs grows", () => {
+    const width = () => parseInt(shadow.querySelector(".overlay").style.getPropertyValue("--card-w"));
+    ui.show(makeTabs(3));
+    const few = width();
+    ui.show(makeTabs(60));
+    expect(width()).toBeLessThan(few);
+    expect(width()).toBeGreaterThanOrEqual(136);
   });
 
   it("uses the thumbnail when available and the favicon otherwise", () => {
@@ -39,7 +78,7 @@ describe("TabSwitcherUI", () => {
     tabs[0].pinned = true;
     tabs[0].audible = true;
     ui.show(tabs);
-    expect(shadow.querySelectorAll(".badge")).toHaveLength(2);
+    expect(shadow.querySelectorAll(".badge svg")).toHaveLength(2);
   });
 
   it("renders titles as text, not HTML", () => {
