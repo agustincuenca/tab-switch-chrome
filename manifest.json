@@ -2,7 +2,12 @@
   "manifest_version": 3,
   "name": "Tab Switch",
   "version": "1.0.0",
-  "description": "Cambia de pestaña con Alt+Tab mostrando un selector visual de las pestañas de Chrome, estilo AltTab.",
+  "description": "Cambia de pestaña con ⌥+Tab, como en el Mac: un selector visual con miniaturas de todas tus pestañas de Chrome.",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
   "permissions": ["tabs", "storage", "unlimitedStorage", "scripting", "favicon"],
   "host_permissions": ["<all_urls>"],
   "background": {
@@ -18,7 +23,12 @@
   ],
   "action": {
     "default_title": "Tab Switch",
-    "default_popup": "popup.html"
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
   },
   "commands": {
     "_execute_action": {
@@ -32,8 +42,7 @@
   "web_accessible_resources": [
     {
       "resources": ["_favicon/*"],
-      "matches": ["<all_urls>"],
-      "extension_ids": ["*"]
+      "matches": ["<all_urls>"]
     }
   ]
 }
