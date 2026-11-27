@@ -125,7 +125,7 @@ Needed to list the user's open tabs (title, URL, favicon, last-used time) across
 
 **Host permission (<all_urls>)**
 ```
-The switcher is opened with the ⌥/Alt+Tab shortcut on whatever page the user is on. Chrome does not let extensions register Alt+Tab as a command, so a content script on every page listens for that shortcut and draws the switcher overlay; it does not read or change page content. The host permission is also required by chrome.tabs.captureVisibleTab, which takes the thumbnail of the tab the user is looking at. Nothing is sent anywhere.
+The switcher is drawn as an overlay on whatever page the user is on. On macOS it opens with Option+Tab: Chrome does not let extensions register Alt+Tab as a command, so a content script on every page listens for that shortcut. On Windows and Linux it opens with the Alt+W extension command, which the service worker forwards to that same content script to draw the overlay. The content script does not read or change page content. The host permission is also required by chrome.tabs.captureVisibleTab, which takes the thumbnail of the tab the user is looking at. Nothing is sent anywhere.
 ```
 
 **scripting**
