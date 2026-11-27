@@ -4,10 +4,13 @@ import { createPage, makeTabs, key, flush, cards, selectedTitle, source } from "
 describe("content script (Alt+Tab overlay)", () => {
   let window, messages;
 
+  let deliver;
+
   function setup(tabCount = 4) {
     const page = createPage({ tabs: makeTabs(tabCount) });
+    page.window.document.hasFocus = () => true;
     page.load("switcher-ui.js", "content.js");
-    ({ window, messages } = page);
+    ({ window, messages, deliver } = page);
   }
 
   const overlay = () => window.document.querySelector("tab-switch-overlay")?.shadowRoot;
@@ -73,10 +76,10 @@ describe("content script (Alt+Tab overlay)", () => {
     expect(cards(overlay())).toHaveLength(0);
   });
 
-  it("W closes the selected tab", async () => {
+  it("X closes the selected tab", async () => {
     altTab();
     await flush();
-    key(window, "keydown", { key: "∑", code: "KeyW", altKey: true });
+    key(window, "keydown", { key: "≈", code: "KeyX", altKey: true });
     expect(sent("close")).toEqual([{ type: "close", tabId: 2 }]);
     expect(cards(overlay())).toHaveLength(3);
   });
@@ -376,5 +379,102 @@ describe("content script inside an iframe", () => {
     page.window.dispatchEvent(new page.window.Event("blur"));
     key(page.window, "keydown", { key: "a", code: "KeyA" });
     expect(relays()).toEqual([["keydown", "Tab"]]);
+  });
+});
+
+describe("content script (Alt+W command)", () => {
+  let page;
+  const overlay = () => page.window.document.querySelector("tab-switch-overlay")?.shadowRoot;
+  const sent = (type) => page.messages.filter((m) => m.type === type);
+  const holdAlt = () => key(page.window, "keydown", { key: "Alt", code: "AltLeft", altKey: true });
+  const releaseAlt = () => key(page.window, "keyup", { key: "Alt", code: "AltLeft" });
+  // Alt+W reaches the page as a message from the service worker.
+  const command = () => {
+    let reply;
+    page.deliverWithReply({ type: "switcherCommand" }, (r) => (reply = r));
+    return reply;
+  };
+
+  beforeEach(() => {
+    page = createPage({ tabs: makeTabs(4) });
+    page.window.document.hasFocus = () => true;
+    page.load("switcher-ui.js", "content.js");
+  });
+
+  it("opens the overlay with the previous tab selected, and each press moves forward", async () => {
+    holdAlt();
+    expect(command()).toEqual({ handled: true });
+    await flush();
+    expect(selectedTitle(overlay())).toBe("Tab 2");
+    command();
+    expect(selectedTitle(overlay())).toBe("Tab 3");
+  });
+
+  it("goes back with Q and switches when Alt is released", async () => {
+    holdAlt();
+    command();
+    await flush();
+    command();
+    command();
+    key(page.window, "keydown", { key: "œ", code: "KeyQ", altKey: true });
+    expect(selectedTitle(overlay())).toBe("Tab 3");
+    releaseAlt();
+    expect(sent("activate")).toEqual([{ type: "activate", tabId: 3 }]);
+  });
+
+  it("counts presses that arrive while the tab list is loading", async () => {
+    holdAlt();
+    command();
+    command();
+    await flush();
+    expect(selectedTitle(overlay())).toBe("Tab 3");
+  });
+
+  it("jumps straight to the previous tab on a quick Alt+W", async () => {
+    holdAlt();
+    releaseAlt(); // let go before the command reached the page
+    command();
+    await flush();
+    expect(sent("activate")).toEqual([{ type: "activate", tabId: 2 }]);
+    expect(overlay()?.querySelector(".card")).toBeFalsy();
+  });
+
+  it("declines when the page doesn't have the keyboard (address bar focused)", () => {
+    page.window.document.hasFocus = () => false;
+    expect(command()).toEqual({ handled: false });
+    expect(sent("getTabs")).toHaveLength(0);
+  });
+});
+
+describe("content script in an iframe (Alt+W command)", () => {
+  let page;
+  const relayed = () => page.messages.filter((m) => m.type === "relayKey").map((m) => m.event);
+
+  beforeEach(() => {
+    page = createPage({ tabs: makeTabs(3), iframe: true });
+    page.window.document.hasFocus = () => true;
+    page.load("switcher-ui.js", "content.js");
+  });
+
+  it("relays Q and Alt's release to the top frame after Alt+W", () => {
+    key(page.window, "keydown", { key: "Alt", code: "AltLeft", altKey: true });
+    page.deliver({ type: "switcherCommand" });
+    key(page.window, "keydown", { key: "œ", code: "KeyQ", altKey: true });
+    key(page.window, "keyup", { key: "Alt", code: "AltLeft" });
+    expect(relayed().map((e) => `${e.type}:${e.code}`)).toEqual(["keydown:KeyQ", "keyup:AltLeft"]);
+  });
+
+  it("tells the top frame at once when Alt was already released (quick Alt+W)", () => {
+    key(page.window, "keydown", { key: "Alt", code: "AltLeft", altKey: true });
+    key(page.window, "keyup", { key: "Alt", code: "AltLeft" });
+    page.deliver({ type: "switcherCommand" });
+    expect(relayed()).toEqual([expect.objectContaining({ type: "keyup", key: "Alt" })]);
+  });
+
+  it("does nothing when the iframe doesn't have the keyboard", () => {
+    page.window.document.hasFocus = () => false;
+    page.deliver({ type: "switcherCommand" });
+    key(page.window, "keydown", { key: "œ", code: "KeyQ", altKey: true });
+    expect(relayed()).toEqual([]);
   });
 });

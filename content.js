@@ -1,6 +1,10 @@
 // In-page overlay: hold Alt (Option on macOS) and press Tab to cycle through
 // tabs, release Alt to switch. Shift+Tab goes backwards.
 //
+// Alt+W does the same where Alt+Tab belongs to the OS (Windows, Linux). It's
+// an extension command, so the page never sees it: the service worker sends
+// it here as a "switcherCommand" message, once per press (see background.js).
+//
 // The overlay lives in the top frame. When keyboard focus is inside an iframe
 // (editors, embedded apps…) the keys never reach the top frame, so the copy
 // running in the iframe relays them through the service worker.
@@ -55,6 +59,7 @@
     // `pressed` below), so a keydown swallowed by the page is covered by
     // relaying the keyup.
     let relaying = false;
+    let altState = "unknown"; // down | up | unknown
     const pressed = new Set();
     const relay = (e) => {
       const { type, key, code, altKey, shiftKey, ctrlKey, metaKey } = e;
@@ -68,6 +73,7 @@
       (e) => {
         if (isOrphaned()) return teardown();
         pressed.add(e.code);
+        if (e.key === "Alt") altState = "down";
         if (isAltTab(e)) relaying = true;
         if (!relaying) return;
         swallow(e);
@@ -81,6 +87,7 @@
       (e) => {
         if (isOrphaned()) return;
         const missedKeyDown = !pressed.delete(e.code);
+        if (e.key === "Alt") altState = "up";
         if (missedKeyDown && isAltTab(e)) relaying = true;
         if (!relaying) return;
         swallow(e);
@@ -91,13 +98,34 @@
     );
     listen(window, "blur", () => {
       relaying = false;
+      altState = "unknown";
       pressed.clear();
+    });
+    // Alt+W opened the overlay in the top frame while this iframe has the
+    // keyboard: relay what follows (Q, Alt's release) like after Alt+Tab. If
+    // Alt was already let go (a quick Alt+W), say so right away.
+    const onFrameMessage = (msg) => {
+      if (msg?.type !== "switcherCommand" || !document.hasFocus()) return;
+      relaying = true;
+      if (altState === "up") {
+        relaying = false;
+        relay({ type: "keyup", key: "Alt", code: "AltLeft", altKey: false, shiftKey: false, ctrlKey: false, metaKey: false });
+      }
+    };
+    chrome.runtime.onMessage.addListener(onFrameMessage);
+    listeners.push(() => {
+      try {
+        chrome.runtime.onMessage.removeListener(onFrameMessage);
+      } catch {}
     });
     return;
   }
 
   let pendingIndex = 1;
   let altReleased = false;
+  // Whether Alt is held, as far as this frame has seen. "unknown" after focus
+  // moved away (into an iframe, another window…).
+  let altState = "unknown";
 
   function getUI() {
     if (ui && ui.host.isConnected) return ui;
@@ -181,6 +209,7 @@
   function onKeyDown(e) {
     if (isOrphaned()) return teardown();
     pressed.add(e.code);
+    if (e.key === "Alt") altState = "down";
     if (e.key === "Alt" && !e.repeat && state === "idle") requestSnapshot();
     handlePress(e);
   }
@@ -202,6 +231,7 @@
   function onKeyUp(e) {
     if (isOrphaned()) return teardown();
     const missedKeyDown = !pressed.delete(e.code);
+    if (e.key === "Alt") altState = "up";
     if (e.key !== "Alt") {
       if (missedKeyDown && (isAltTab(e) || state === "open")) handlePress(e);
       else if (state === "open") swallow(e);
@@ -217,6 +247,7 @@
   }
 
   function onBlur() {
+    altState = "unknown";
     pressed.clear();
     if (state !== "idle") dismiss();
   }
@@ -227,8 +258,30 @@
     dismiss();
   }
 
-  // Keys relayed from an iframe that has keyboard focus.
-  function onMessage(msg) {
+  // Alt+W, relayed by the service worker. Opens the overlay with the previous
+  // tab selected, or moves forward if it's already up. Answers whether it
+  // took it: with the address bar focused the page can't see Alt's release,
+  // so the service worker opens the toolbar popup instead.
+  function onCommand() {
+    if (isOrphaned() || !document.hasFocus()) return false;
+    if (state === "open") {
+      ui.move(1);
+    } else if (state === "loading") {
+      pendingIndex += 1;
+    } else {
+      open(1);
+      // Alt was let go before the command reached us: a quick Alt+W.
+      if (altState === "up") altReleased = true;
+    }
+    return true;
+  }
+
+  // Keys relayed from an iframe that has keyboard focus, and Alt+W.
+  function onMessage(msg, sender, sendResponse) {
+    if (msg?.type === "switcherCommand") {
+      sendResponse({ handled: onCommand() });
+      return;
+    }
     if (msg?.type !== "relayedKey") return;
     const e = { ...msg.event, preventDefault() {}, stopImmediatePropagation() {} };
     if (e.type === "keydown") onKeyDown(e);

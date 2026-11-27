@@ -1,8 +1,8 @@
-# Chrome Web Store — Tab Switch (v1.0.0, primera publicación)
+# Chrome Web Store — Tab Switch (v1.0.1, primera publicación)
 
 Texto listo para copiar y pegar en cada campo del Developer Dashboard, en el orden en que aparecen.
 
-- **Paquete:** `dist/TabSwitch-v1.0.0.zip` (se genera con `scripts/build-zip.sh`)
+- **Paquete:** `dist/TabSwitch-v1.0.1.zip` (se genera con `scripts/build-zip.sh`)
 - **Capturas:** `store/screenshots/` (se regeneran con `node scripts/store-screenshots.mjs`)
 - **Promo pequeña:** `store/promo-small-440x280.png`
 
@@ -12,7 +12,7 @@ La interfaz de la extensión está en español, así que la ficha va en español
 
 ## 0. Subir el paquete
 
-**Items → New item → Upload** → `dist/TabSwitch-v1.0.0.zip`
+**Items → New item → Upload** → `dist/TabSwitch-v1.0.1.zip`
 
 ---
 
@@ -25,41 +25,45 @@ Tab Switch
 
 ### Summary (lo coge del manifest, máx. 132)
 ```
-Cambia de pestaña con ⌥+Tab, como en el Mac: un selector visual con miniaturas de todas tus pestañas de Chrome.
+Cambia de pestaña como cambias de app: ⌥+Tab en Mac, Alt+W en Windows. Un selector visual con miniaturas de todas tus pestañas.
 ```
 
 ### Description
 ```
-Tab Switch lleva a Chrome el gesto que ya usas para cambiar de aplicación: mantén ⌥ (Alt), pulsa Tab y elige pestaña en un selector visual con miniaturas de todas tus pestañas abiertas, de todas las ventanas, ordenadas por uso reciente.
+Tab Switch lleva a Chrome el gesto que ya usas para cambiar de aplicación: mantén Alt, pulsa una tecla y elige pestaña en un selector visual con miniaturas de todas tus pestañas abiertas, de todas las ventanas, ordenadas por uso reciente.
+
+• En Mac: ⌥+Tab, igual que para cambiar de app.
+• En Windows y Linux: Alt+W (el sistema se reserva Alt+Tab).
 
 
 CÓMO SE USA
 
-• Mantén ⌥/Alt y pulsa Tab → se abre el selector y avanza a la siguiente pestaña
-• ⌥/Alt + Shift + Tab → retrocede
+Mantén Alt (⌥) pulsado todo el rato y:
+• Tab o W → siguiente pestaña
+• Shift+Tab o Q → pestaña anterior
 • Flechas ← → ↑ ↓ → muévete por la cuadrícula
-• Suelta ⌥/Alt → vas a la pestaña seleccionada
-• W (con ⌥/Alt pulsado) → cierra la pestaña seleccionada
+• X → cierra la pestaña seleccionada
+• Suelta Alt → vas a la pestaña seleccionada
 • Esc → cancela
 • Ratón → pasar por encima selecciona, clic cambia
 
-Un toque rápido de ⌥+Tab salta directamente a la última pestaña que usaste, como en el sistema.
+Un toque rápido de ⌥+Tab o Alt+W salta directamente a la última pestaña que usaste.
 
 
 LO QUE TIENE
 
 🖼  Miniaturas reales de cada pestaña, no solo títulos
 🕘  Orden por uso reciente, entre todas tus ventanas
+💻  Mac, Windows y Linux
 🌗  Modo claro y oscuro, según tu sistema
 ⚡  Toque rápido para saltar a la pestaña anterior
 🧩  Funciona también con el foco dentro de iframes y editores incrustados
-⌨️  Alt+Q abre el mismo selector como ventana de la extensión, para páginas donde ⌥+Tab no llega (configurable en chrome://extensions/shortcuts)
+⌨️  Alt+W funciona en cualquier página, también en las de Chrome (chrome://). Puedes cambiarlo en chrome://extensions/shortcuts
 
 
 LIMITACIONES
 
-• Chrome no deja a las extensiones usar Alt+Tab como atajo global, así que se captura dentro de cada página. En páginas chrome://, la Chrome Web Store, la nueva pestaña o con el foco en la barra de direcciones, usa Alt+Q.
-• Pensada para macOS, donde ⌥+Tab está libre. En Windows y Linux el sistema se queda Alt+Tab; ahí usa Alt+Q.
+• En Mac, ⌥+Tab se captura dentro de cada página, así que no llega a las páginas chrome://, la Chrome Web Store, la nueva pestaña ni a la barra de direcciones. Ahí usa Alt+W.
 • Las pestañas que aún no has visto desde que instalaste la extensión aparecen con su icono hasta que las visitas.
 
 
@@ -88,9 +92,9 @@ Español
 | Campo | Archivo |
 | --- | --- |
 | Store icon (128×128) | `icons/icon128.png` |
-| Screenshots (1280×800) | `store/screenshots/01-switcher-light.png`, `store/screenshots/02-switcher-dark.png` |
+| Screenshots (1280×800) | `store/screenshots/01-switcher-light.jpg`, `store/screenshots/02-switcher-dark.jpg` |
 | Small promo tile (440×280) | `store/promo-small-440x280.png` |
-| Marquee (1400×560) | opcional, se puede dejar vacío |
+| Marquee (1400×560) | `store/promo-marquee-1400x560.png` |
 
 ---
 
@@ -109,7 +113,7 @@ Español
 
 ### Single purpose description
 ```
-Tab Switch lets the user switch between their open Chrome tabs with ⌥/Alt+Tab, through a visual switcher that shows a thumbnail of each tab, ordered by most recent use. That is its only purpose.
+Tab Switch lets the user switch between their open Chrome tabs with ⌥+Tab on macOS or Alt+W on Windows and Linux, through a visual switcher that shows a thumbnail of each tab, ordered by most recent use. That is its only purpose.
 ```
 
 ### Permission justifications
@@ -161,6 +165,17 @@ Compliance (marcar las tres):
 ### Privacy policy URL
 ```
 https://github.com/agustincuenca/tab-switch-chrome/blob/main/PRIVACY.md
+```
+
+---
+
+## 4b. Test instructions
+
+Username y Password: vacíos.
+
+Additional instructions (máx. 500):
+```
+No login needed. Open 3+ tabs on regular websites and visit each once (thumbnails are captured when a tab is shown). Windows/Linux: hold Alt, press W to open the switcher, W/Q to move forward/back, release Alt to switch. macOS: the same with Option+Tab (Tab/Shift+Tab or W/Q to move), or Option+W. X closes the selected tab, Esc cancels. On chrome:// pages and the Web Store use Alt+W.
 ```
 
 ---

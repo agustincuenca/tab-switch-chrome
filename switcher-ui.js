@@ -136,8 +136,8 @@ globalThis.TabSwitcherUI = class TabSwitcherUI {
   `;
 
   static HINTS = {
-    overlay: [["\u2325", "suelta para ir"], ["\u21E5", "siguiente"], ["W", "cerrar"], ["esc", "cancelar"]],
-    popup: [["\u21B5", "ir"], ["\u21E5", "siguiente"], ["W", "cerrar"], ["esc", "salir"]],
+    overlay: [["\u2325", "suelta para ir"], ["\u21E5", "siguiente"], ["Q", "anterior"], ["X", "cerrar"], ["esc", "cancelar"]],
+    popup: [["\u2325", "suelta para ir"], ["W", "siguiente"], ["Q", "anterior"], ["X", "cerrar"], ["esc", "salir"]],
   };
 
   static ICONS = {
@@ -307,6 +307,15 @@ globalThis.TabSwitcherUI = class TabSwitcherUI {
       case "Tab":
         this.move(e.shiftKey ? -1 : 1);
         return true;
+      // W/Q step forward/back like Tab/Shift+Tab: Alt+W opens the switcher
+      // where Alt+Tab belongs to the OS (Windows, Linux) or doesn't reach the
+      // page (chrome:// pages), and both keys sit under the left hand.
+      case "KeyW":
+        this.move(1);
+        return true;
+      case "KeyQ":
+        this.move(-1);
+        return true;
       case "ArrowRight":
         this.move(1);
         return true;
@@ -326,7 +335,7 @@ globalThis.TabSwitcherUI = class TabSwitcherUI {
       case "Escape":
         this.callbacks.onDismiss?.();
         return true;
-      case "KeyW":
+      case "KeyX":
         this.removeSelected();
         return true;
     }

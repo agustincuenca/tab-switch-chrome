@@ -180,11 +180,11 @@ test("Escape cancels the switch", async ({ openTabs, activeTitle }) => {
   expect(await activeTitle()).toBe("site-c");
 });
 
-test("W closes the selected tab from the switcher", async ({ openTabs }) => {
+test("X closes the selected tab from the switcher", async ({ openTabs }) => {
   const [, b, c] = await openTabs(["a", "b", "c"]);
 
   await holdAltAndTab(c);
-  await c.keyboard.press("KeyW");
+  await c.keyboard.press("KeyX");
   await c.keyboard.press("Escape");
   await c.keyboard.up("Alt");
 
@@ -199,14 +199,19 @@ test("the content script does not break normal Tab navigation", async ({ openTab
   await expect(page.locator("#two")).toBeFocused();
 });
 
-test("the popup lists tabs and switches with Enter", async ({ context, worker, openTabs, activeTitle }) => {
-  await openTabs(["a", "b"]);
+async function openPopup(context, worker) {
   const extensionId = new URL(worker.url()).host;
   const popup = await context.newPage();
   await popup.goto(`chrome-extension://${extensionId}/popup.html`);
   await popup.bringToFront();
   await expect(popup.locator("#root")).toBeAttached();
   await popup.waitForTimeout(300);
+  return popup;
+}
+
+test("the popup lists tabs and switches with Enter", async ({ context, worker, openTabs, activeTitle }) => {
+  await openTabs(["a", "b"]);
+  const popup = await openPopup(context, worker);
 
   await popup.keyboard.press("Enter");
 
@@ -270,4 +275,25 @@ test("refreshes the thumbnail of the tab you leave with Alt+Tab", async ({ worke
   expect(r).toBeGreaterThan(180);
   expect(g).toBeLessThan(100);
   expect(b).toBeLessThan(100);
+});
+
+// Alt+W opens the popup with Alt still held (the command itself can't be
+// pressed from Playwright); from there W/Q move and releasing Alt switches.
+test("the popup moves with W and Q while Alt is held and switches on release", async ({
+  context,
+  worker,
+  openTabs,
+  activeTitle,
+}) => {
+  await openTabs(["a", "b", "c"]);
+  const popup = await openPopup(context, worker);
+
+  await popup.keyboard.down("Alt");
+  // Most recent first after the popup's own tab: c (selected), b, a.
+  await popup.keyboard.press("KeyW"); // b
+  await popup.keyboard.press("KeyW"); // a
+  await popup.keyboard.press("KeyQ"); // back to b
+  await popup.keyboard.up("Alt");
+
+  await expect.poll(activeTitle).toBe("site-b");
 });

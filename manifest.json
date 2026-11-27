@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Tab Switch",
-  "version": "1.0.0",
-  "description": "Cambia de pestaña con ⌥+Tab, como en el Mac: un selector visual con miniaturas de todas tus pestañas de Chrome.",
+  "version": "1.0.1",
+  "description": "Cambia de pestaña como cambias de app: ⌥+Tab en Mac, Alt+W en Windows. Un selector visual con miniaturas de todas tus pestañas.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -31,12 +31,12 @@
     }
   },
   "commands": {
-    "_execute_action": {
+    "open-switcher": {
       "suggested_key": {
-        "default": "Alt+Q",
-        "mac": "Alt+Q"
+        "default": "Alt+W",
+        "mac": "Alt+W"
       },
-      "description": "Abrir el selector de pestañas (funciona también en páginas chrome://)"
+      "description": "Abrir el selector de pestañas y avanzar (mantén Alt; Q retrocede, soltar Alt cambia)"
     }
   },
   "web_accessible_resources": [

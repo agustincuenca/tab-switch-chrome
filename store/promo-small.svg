@@ -3,6 +3,6 @@
   <rect width="440" height="280" fill="url(#g)"/>
   <image x="36" y="76" width="128" height="128" xlink:href="../icons/icon128.png"/>
   <text x="184" y="128" font-family="Helvetica Neue, Arial, sans-serif" font-size="40" font-weight="700" fill="#1f1f1f">Tab Switch</text>
-  <text x="186" y="164" font-family="Helvetica Neue, Arial, sans-serif" font-size="19" fill="#3c4043">⌥+Tab para tus pestañas</text>
-  <text x="186" y="190" font-family="Helvetica Neue, Arial, sans-serif" font-size="19" fill="#3c4043">de Chrome, con miniaturas</text>
+  <text x="186" y="164" font-family="Helvetica Neue, Arial, sans-serif" font-size="19" fill="#3c4043">⌥+Tab en Mac, Alt+W en</text>
+  <text x="186" y="190" font-family="Helvetica Neue, Arial, sans-serif" font-size="19" fill="#3c4043">Windows, con miniaturas</text>
 </svg>

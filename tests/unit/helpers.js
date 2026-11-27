@@ -60,6 +60,8 @@ export function createPage({ tabs = [], iframe = false } = {}) {
     messages,
     // Delivers a message from the service worker to the content script.
     deliver: (msg) => onMessage.forEach((fn) => fn(msg, {}, () => {})),
+    // Same, collecting the reply a listener sends back.
+    deliverWithReply: (msg, reply) => onMessage.forEach((fn) => fn(msg, {}, reply)),
     load: (...files) => files.forEach((file) => window.eval(source(file))),
   };
 }

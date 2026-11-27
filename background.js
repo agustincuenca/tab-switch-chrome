@@ -168,6 +168,29 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => chrome.storage.session.remove(lastCaptureKey(tabId)));
 
+// Alt+W ("open-switcher" in manifest.json): the switcher for where Alt+Tab
+// belongs to the OS. Each press goes to the overlay in the current page,
+// which opens or moves forward; where pages can't host it (chrome:// pages,
+// the Web Store, the address bar focused) the toolbar popup stands in.
+async function onSwitcherCommand(tab) {
+  if (await popupIsOpen()) {
+    await chrome.runtime.sendMessage({ type: "popupCommand" }).catch(() => {});
+    return;
+  }
+  if (!tab) [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+  const reply = tab && (await chrome.tabs.sendMessage(tab.id, { type: "switcherCommand" }).catch(() => null));
+  if (!reply?.handled) await chrome.action.openPopup().catch(() => {});
+}
+
+async function popupIsOpen() {
+  const contexts = await chrome.runtime.getContexts({ contextTypes: ["POPUP"] }).catch(() => []);
+  return contexts.length > 0;
+}
+
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === "open-switcher") onSwitcherCommand(tab);
+});
+
 // Content scripts are not injected into tabs that were already open when the
 // extension was installed or reloaded, so inject them by hand.
 chrome.runtime.onInstalled.addListener(async () => {

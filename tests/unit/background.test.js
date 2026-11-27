@@ -23,7 +23,7 @@ function storageArea(initial = {}) {
   };
 }
 
-function loadBackground({ local = {}, session = {}, lastFocusedActive = 2 } = {}) {
+function loadBackground({ local = {}, session = {}, lastFocusedActive = 2, popupOpen = false, pageReply } = {}) {
   const listeners = {};
   const on = (name) => ({ addListener: (fn) => (listeners[name] = fn) });
   const localArea = storageArea(local);
@@ -33,6 +33,8 @@ function loadBackground({ local = {}, session = {}, lastFocusedActive = 2 } = {}
   const chrome = {
     runtime: {
       getURL: (path) => `chrome-extension://ext-id${path}`,
+      getContexts: vi.fn(async () => (popupOpen ? [{ contextType: "POPUP" }] : [])),
+      sendMessage: vi.fn(async () => {}),
       onMessage: on("runtime.onMessage"),
       onInstalled: on("runtime.onInstalled"),
     },
@@ -49,7 +51,7 @@ function loadBackground({ local = {}, session = {}, lastFocusedActive = 2 } = {}
         return tab;
       }),
       remove: vi.fn(async () => {}),
-      sendMessage: vi.fn(async () => {}),
+      sendMessage: vi.fn(async (tabId, msg) => (msg.type === "switcherCommand" ? pageReply : undefined)),
       captureVisibleTab: vi.fn(async () => "data:image/jpeg;base64,RAW"),
       onActivated: on("tabs.onActivated"),
       onUpdated: on("tabs.onUpdated"),
@@ -62,6 +64,8 @@ function loadBackground({ local = {}, session = {}, lastFocusedActive = 2 } = {}
     },
     storage: { local: localArea, session: sessionArea },
     scripting: { executeScript: vi.fn(async () => []) },
+    commands: { onCommand: on("commands.onCommand") },
+    action: { openPopup: vi.fn(async () => {}) },
   };
 
   const canvases = [];
@@ -172,6 +176,48 @@ describe("background service worker", () => {
     const event = { type: "keydown", code: "Tab", altKey: true };
     await send({ type: "relayKey", event }, { tab: { id: 3 }, frameId: 7 });
     expect(chrome.tabs.sendMessage).toHaveBeenCalledWith(3, { type: "relayedKey", event }, { frameId: 0 });
+  });
+
+  describe("Alt+W (open-switcher command)", () => {
+    const press = async (bg, tab = { id: 3 }) => {
+      bg.listeners["commands.onCommand"]("open-switcher", tab);
+      await new Promise((r) => setTimeout(r, 0));
+    };
+
+    it("hands each press to the page, which opens or advances its overlay", async () => {
+      const bg = loadBackground({ pageReply: { handled: true } });
+      await press(bg);
+      expect(bg.chrome.tabs.sendMessage).toHaveBeenCalledWith(3, { type: "switcherCommand" });
+      expect(bg.chrome.action.openPopup).not.toHaveBeenCalled();
+    });
+
+    it("opens the toolbar popup where the page can't show the overlay", async () => {
+      const bg = loadBackground({ pageReply: { handled: false } });
+      await press(bg);
+      expect(bg.chrome.action.openPopup).toHaveBeenCalledOnce();
+    });
+
+    it("opens the toolbar popup when the page has no content script (chrome:// pages)", async () => {
+      const bg = loadBackground();
+      bg.chrome.tabs.sendMessage.mockRejectedValueOnce(new Error("Receiving end does not exist."));
+      await press(bg);
+      expect(bg.chrome.action.openPopup).toHaveBeenCalledOnce();
+    });
+
+    it("advances the popup instead when it's already open", async () => {
+      const bg = loadBackground({ popupOpen: true });
+      await press(bg);
+      expect(bg.chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: "popupCommand" });
+      expect(bg.chrome.tabs.sendMessage).not.toHaveBeenCalled();
+      expect(bg.chrome.action.openPopup).not.toHaveBeenCalled();
+    });
+
+    it("ignores other commands", async () => {
+      const bg = loadBackground();
+      bg.listeners["commands.onCommand"]("something-else", { id: 3 });
+      await new Promise((r) => setTimeout(r, 0));
+      expect(bg.chrome.tabs.sendMessage).not.toHaveBeenCalled();
+    });
   });
 
   it("ignores unknown messages", async () => {

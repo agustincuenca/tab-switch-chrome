@@ -1,6 +1,6 @@
 // Takes the Chrome Web Store screenshots (1280x800) with the real extension
 // loaded in Playwright's Chromium, over a handful of mock pages served locally.
-// Usage: node scripts/store-screenshots.mjs  → writes store/screenshots/*.png
+// Usage: node scripts/store-screenshots.mjs  → writes store/screenshots/*.jpg
 
 import { chromium } from "@playwright/test";
 import { createServer } from "node:http";
@@ -84,12 +84,13 @@ async function shoot(colorScheme, file, presses) {
   for (let i = 0; i < presses; i++) await last.keyboard.press("Tab");
   await last.locator("tab-switch-overlay").waitFor({ state: "attached" });
   await last.waitForTimeout(500);
-  await last.screenshot({ path: path.join(outDir, file) });
+  // JPEG: the store wants images without an alpha channel.
+  await last.screenshot({ path: path.join(outDir, file), type: "jpeg", quality: 95 });
   await last.keyboard.up("Alt");
   await context.close();
 }
 
-await shoot("light", "01-switcher-light.png", 1);
-await shoot("dark", "02-switcher-dark.png", 3);
+await shoot("light", "01-switcher-light.jpg", 1);
+await shoot("dark", "02-switcher-dark.jpg", 3);
 server.close();
 console.log(`Screenshots in ${path.relative(root, outDir)}/`);

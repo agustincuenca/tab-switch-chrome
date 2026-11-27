@@ -125,9 +125,21 @@ describe("TabSwitcherUI", () => {
     expect(keydown("KeyA")).toBe(false);
   });
 
-  it("closes the selected tab with W and keeps a valid selection", () => {
-    ui.show(makeTabs(3), 2);
+  it("moves forward with W and back with Q", () => {
+    ui.show(makeTabs(3), 0);
+    expect(keydown("KeyW")).toBe(true);
+    expect(selectedTitle(shadow)).toBe("Tab 2");
     keydown("KeyW");
+    keydown("KeyW");
+    expect(selectedTitle(shadow)).toBe("Tab 1");
+    expect(keydown("KeyQ")).toBe(true);
+    expect(selectedTitle(shadow)).toBe("Tab 3");
+    expect(callbacks.onClose).not.toHaveBeenCalled();
+  });
+
+  it("closes the selected tab with X and keeps a valid selection", () => {
+    ui.show(makeTabs(3), 2);
+    keydown("KeyX");
     expect(callbacks.onClose).toHaveBeenCalledWith(expect.objectContaining({ id: 3 }));
     expect(cards(shadow)).toHaveLength(2);
     expect(selectedTitle(shadow)).toBe("Tab 2");
@@ -135,7 +147,7 @@ describe("TabSwitcherUI", () => {
 
   it("dismisses when the last tab is closed", () => {
     ui.show(makeTabs(1));
-    keydown("KeyW");
+    keydown("KeyX");
     expect(callbacks.onDismiss).toHaveBeenCalledOnce();
   });
 
